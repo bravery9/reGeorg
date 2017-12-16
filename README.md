@@ -49,7 +49,8 @@ optional arguments:
   -w , --write-buff     Remote read buffer, max data to be received per Response
   -u , --url            The url containing the tunnel script
   -v , --verbose        Verbose output[INFO|DEBUG]
-  -m , --payloads-mode  Select reGeorg request headers payloads mode[header|url|body]
+  --payloads-mode       Select reGeorg request headers payloads mode[header|url]
+  --without-check       Start proxy without check if tunnel url accessable
   --custom-headers      Set custom header[{'Cookies': 'JSESSIONID=ABC123;Token=asdfghjkl', 'Authorization': 'Basic YWRtaW46YWRtaW4=', 'Referer': 'trusted.net'}]
 ```
 
@@ -84,19 +85,13 @@ ChangeLog
 * Single session mode (imbeee)
 * Custom headers.
 * Optional buffer size, the transfer speed many times faster.
+* Optional url check.
+* Proxy headers payloads can be selected between URL parameters and Request headers.
 
 TODO
 ---------
 
 * The proxy header need to be obfuscated. (WAF bypass)
-* Proxy header can be sent with POST body or URL params.
-* Support Multi-level forward proxy.
-
-```bash
-$ python reGeorgSocksProxy.py -p 8080 -u https://intranet1/tunnel.jsp -f https://intranet2/tunnel.php http://intranet3/tunnel.aspx
-```
-
-![multi_level_proxy](multi_level_proxy.png)
 
 License
 ----
